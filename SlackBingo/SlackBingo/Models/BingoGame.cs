@@ -1,7 +1,10 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SlackBingo.Models
 {
@@ -22,7 +25,7 @@ namespace SlackBingo.Models
             _displayName = displayName;
         }
 
-        public (string Error, string Result) TryMove(MoveType type, string argument)
+        public async Task<(string Error, string Result)> TryMove(MoveType type, string argument, ILogger log, CancellationToken token)
         {
             var error = (string)null;
             var result = (string)null;
@@ -32,14 +35,13 @@ namespace SlackBingo.Models
             {
                 case MoveType.Join:
                     if (player != null) error = "You have already joined this game.  Use '/bingo leave' if you'd like to leave the game";
-                    else if (_data.Started.HasValue) error = "Game is already in progress.  Please wait for the current game to end and then you can join";
-                    else _data.Players.Add(new BingoPlayer { UserName = _userName, DisplayName = _displayName });
+                    else DoJoin();
                     break;
                 case MoveType.Start:
                     if (player == null) error = "You are not a player in this game";
                     else if (_data.Started.HasValue) error = "Game is already in progress";
                     else if (_data.Players.Count < 1) error = "You must have at least two people in the game to play";
-                    else result = DoStart();
+                    else result = await DoStart(log, token);
                     break;
                 case MoveType.Next:
                     if (player == null) error = "You are not a player in this game";
@@ -85,7 +87,7 @@ namespace SlackBingo.Models
             return DoCard(player);
         }
 
-        private string DoStart()
+        private async Task<string> DoStart(ILogger log, CancellationToken token)
         {
             _data.Started = DateTimeOffset.UtcNow;
             _data.NextIndex = 1;
@@ -104,7 +106,8 @@ namespace SlackBingo.Models
             }
 
             var multiplier = 1.6 + (_data.Players.Count > 100 ? 1.0 : (Math.Sqrt(_data.Players.Count) / 10.0));
-            _data.WordSet = RandomizeWordList(WordList.List.Take((int)Math.Ceiling(_data.SideSize * _data.SideSize * multiplier))).ToList();
+            var allWords = await WordList.GetWordList(log, token);
+            _data.WordSet = RandomizeWordList(allWords.Take((int)Math.Ceiling(_data.SideSize * _data.SideSize * multiplier))).ToList();
             foreach (var player in _data.Players)
             {
                 player.Card = GenerateCard();

@@ -92,7 +92,7 @@ namespace SlackBingo
             try
             {
                 var game = new BingoGame(data, userName, displayName);
-                var (error, result) = game.TryMove(action, argument);
+                var (error, result) = await game.TryMove(action, argument, log, token);
 
                 switch (action)
                 {
