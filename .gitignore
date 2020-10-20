@@ -2,4 +2,10 @@
 # This .gitignore file was automatically created by Microsoft(R) Visual Studio.
 ################################################################################
 
-/SlackBingo/.vs/SlackBingo/v16/.suo
+*.suo
+*.user
+bin/
+obj/
+.vscode/
+.vs/
+local.settings.json
