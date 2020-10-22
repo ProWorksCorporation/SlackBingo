@@ -1,0 +1,11 @@
+{
+    "name": "discord-bingo",
+    "version": "1.0.0",
+    "description": "A simple Bingo game for Discord",
+    "main": "main.js",
+    "author": "ProWorks",
+    "dependencies": {
+        "discord.io": "https://github.com/woor/discord.io/tarball/gateway_v6",
+        "request": "^2.88.2"
+    }
+}

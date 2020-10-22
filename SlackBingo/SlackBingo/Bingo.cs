@@ -31,7 +31,7 @@ namespace SlackBingo
         private static readonly Regex _textPattern = new Regex("^(?<command>" + string.Join('|', _allCommands) + ")( (?<gameId>[0-9a-z_/-]+))?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         [FunctionName("Bingo")]
-        public static async Task<AppResponse> Run(
+        public static async Task<AppResponse> Slack(
             [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
             [Table("bingo")] CloudTable table,
             ILogger log,
@@ -47,14 +47,56 @@ namespace SlackBingo
                 var text = data.TryGetValue("text", out value) ? value : null;
                 var channelId = data.TryGetValue("channel_id", out value) ? value : null;
                 var channelName = data.TryGetValue("channel_name", out value) ? value : null;
-
-                if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(userName)) return response = "Invalid request.  Please try `/bingo help` for a list of valid commands";
-
-                var validCommands = _admins.Contains(userId) ? _allCommands : _commands;
                 var match = _textPattern.Match(text ?? "");
                 var command = match.Success ? match.Groups["command"].Value.ToLowerInvariant() : null;
                 var argument = match.Success && match.Groups["gameId"].Success ? match.Groups["gameId"].Value : null;
-                if (!match.Success || !validCommands.Contains(command) || command == "help") return response = "You can use one of the following commands:\r\n\r\n    `/bingo " + string.Join("`\r\n    `/bingo ", validCommands) + "`";
+
+                return await Handle(channelId, channelName, userId, userName, command, argument, table, log, token, PostCardsToSlack);
+            }
+            finally
+            {
+                log.LogInformation("Sending {type} response:\r\n{response}", response?.ResponseType.ToString() ?? "unknown", response?.Text);
+            }
+        }
+
+        [FunctionName("Discord")]
+        public static async Task<AppResponse> Discord(
+            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
+            [Table("bingo")] CloudTable table,
+            ILogger log,
+            CancellationToken token)
+        {
+            var response = (AppResponse)null;
+            try
+            {
+                var data = (req.Method.ToLowerInvariant() == "post" ? await req.ReadFormAsync(token) : (IEnumerable<KeyValuePair<string, StringValues>>)req.Query).ToDictionary(x => x.Key, x => x.Value.ToString());
+                log.LogInformation($"Received {req.Method.ToUpperInvariant()} request - {JsonConvert.SerializeObject(data, Formatting.Indented)}");
+                var userId = data.TryGetValue("user_id", out var value) ? value : null;
+                var userName = data.TryGetValue("user_name", out value) ? value : null;
+                var text = data.TryGetValue("text", out value) ? value : null;
+                var channelId = data.TryGetValue("channel_id", out value) ? value : null;
+                var channelName = data.TryGetValue("channel_name", out value) ? value : null;
+                var match = _textPattern.Match(text ?? "");
+                var command = match.Success ? match.Groups["command"].Value.ToLowerInvariant() : null;
+                var argument = match.Success && match.Groups["gameId"].Success ? match.Groups["gameId"].Value : null;
+
+                return await Handle(channelId, channelName, userId, userName, command, argument, table, log, token, PostCardsToDiscord);
+            }
+            finally
+            {
+                log.LogInformation("Sending {type} response:\r\n{response}", response?.ResponseType.ToString() ?? "unknown", response?.Text);
+            }
+        }
+
+        private static async Task<AppResponse> Handle(string channelId, string channelName, string userId, string userName, string command, string argument, CloudTable table, ILogger log, CancellationToken token, Func<string, IEnumerable<BingoPlayer>, ILogger, CancellationToken, Task> postCards)
+        {
+            var response = (AppResponse)null;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(userName)) return response = "Invalid request.  Please try `/bingo help` for a list of valid commands";
+
+                var validCommands = _admins.Contains(userId) ? _allCommands : _commands;
+                if (string.IsNullOrWhiteSpace(command) || !validCommands.Contains(command) || command == "help") return response = "You can use one of the following commands:\r\n\r\n    `/bingo " + string.Join("`\r\n    `/bingo ", validCommands) + "`";
                 if ((command == "kill" || command == "get") && string.IsNullOrWhiteSpace(argument)) return response = "You must provide a valid gameId with this command.  See `/bingo list` for a list of valid game IDs";
 
                 try
@@ -64,7 +106,7 @@ namespace SlackBingo
                         case "kill": return response = await Kill(table, argument, token);
                         case "get": return response = await Get(table, argument, token);
                         case "list": return response = await List(table, token);
-                        default: return response = await Play(table, channelId, command, argument, userId, userName, channelName, log, token);
+                        default: return response = await Play(table, channelId, command, argument, userId, userName, channelName, log, token, postCards);
                     }
                 }
                 catch (Exception ex)
@@ -79,7 +121,7 @@ namespace SlackBingo
             }
         }
 
-        private static async Task<AppResponse> Play(CloudTable table, string gameId, string move, string argument, string userName, string displayName, string channelName, ILogger log, CancellationToken token)
+        private static async Task<AppResponse> Play(CloudTable table, string gameId, string move, string argument, string userName, string displayName, string channelName, ILogger log, CancellationToken token, Func<string, IEnumerable<BingoPlayer>, ILogger, CancellationToken, Task> postCards)
         {
             if (!Enum.TryParse<MoveType>(move, true, out var action)) return "Invalid move";
 
@@ -103,7 +145,7 @@ namespace SlackBingo
                     case MoveType.Start:
                         if (error != null) return error;
 
-                        await PostCards(gameId, data.Players, log, token);
+                        await postCards(gameId, data.Players, log, token);
 
                         return (true, $"The game has been started.  The first word is `{result}`");
                     default: return error ?? result;
@@ -115,19 +157,49 @@ namespace SlackBingo
             }
         }
 
-        private static async Task PostCards(string gameId, IEnumerable<BingoPlayer> players, ILogger log, CancellationToken token)
+        private static async Task PostCardsToSlack(string gameId, IEnumerable<BingoPlayer> players, ILogger log, CancellationToken token)
         {
             using (var client = new HttpClient())
             {
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _slackApiToken);
                 foreach (var player in players)
                 {
-                    await PostCard(client, gameId, player.UserName, player.Format, player.Card, log, token);
+                    await PostCardToSlack(client, gameId, player.UserName, player.Format, player.Card, log, token);
                 }
             }
         }
 
-        private static async Task PostCard(HttpClient client, string gameId, string userName, string format, IList<IList<string>> card, ILogger log, CancellationToken token)
+        private static async Task PostCardToSlack(HttpClient client, string gameId, string userName, string format, IList<IList<string>> card, ILogger log, CancellationToken token)
+        {
+            var message = new BingoCardMessage { Channel = gameId, UserName = userName, Text = CreateTable(format, card) };
+            var body = JsonConvert.SerializeObject(message);
+
+            using (var req = new HttpRequestMessage(HttpMethod.Post, _postEphemeralUrl))
+            using (var content = new StringContent(body, new UTF8Encoding(false), "application/json"))
+            {
+                req.Content = content;
+
+                using (var resp = await client.SendAsync(req, token))
+                {
+                    var result = await resp.Content.ReadAsStringAsync();
+                    log.LogInformation("Got Slack ephemeral message response.  Request={request}, Response={response}", body, result);
+                }
+            }
+        }
+
+        private static async Task PostCardsToDiscord(string gameId, IEnumerable<BingoPlayer> players, ILogger log, CancellationToken token)
+        {
+            using (var client = new HttpClient())
+            {
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _slackApiToken);
+                foreach (var player in players)
+                {
+                    await PostCardToDiscord(client, gameId, player.UserName, player.Format, player.Card, log, token);
+                }
+            }
+        }
+
+        private static async Task PostCardToDiscord(HttpClient client, string gameId, string userName, string format, IList<IList<string>> card, ILogger log, CancellationToken token)
         {
             var message = new BingoCardMessage { Channel = gameId, UserName = userName, Text = CreateTable(format, card) };
             var body = JsonConvert.SerializeObject(message);
