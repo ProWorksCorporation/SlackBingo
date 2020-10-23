@@ -287,7 +287,7 @@ function BingoGame()
                 break;
         }
 
-        game.activities.push({userId, userName, date:new Date(), action, error, result});
+        (game.activities || []).push({userId, userName, date:new Date(), action, error, result});
 
         return [error, result];
     }

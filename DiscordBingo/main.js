@@ -47,7 +47,7 @@ bot.on('message', async function (userName, userId, channelId, message, evt) {
                 default:
                     game = games[channelId];
                     if (cmd !== 'help' && !game) game = games[channelId] = games[channelId] || {channelId, players:[], nextIndex:0, sideSize:5, started: null, activities:[]};
-                    result = await bingo.move(game, userId, userName, cmd, args);
+                    result = await bingo.move(game || {}, userId, userName, cmd, args);
                     break;
             }
 
