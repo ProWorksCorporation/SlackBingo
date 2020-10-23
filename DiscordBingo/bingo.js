@@ -273,15 +273,15 @@ function BingoGame()
             default:
                 result = `You can use one of the following commands:
     \`!bingo join [{format}]\` Joins a game so that you will get a card the next time the game is started, optionally choosing your card format (see the format command below)
-    \`!bingo start\`           Starts a game
-    \`!bingo next\`            Calls out the next word
-    \`!bingo bingo\`           Declares that you have a bingo (validation is performed...)
-    \`!bingo leave\`           Leaves a game
+    \`!bingo start [{format}]\`  Starts a game, optionally choosing your card format (see the format command below)
+    \`!bingo next\`                        Calls out the next word
+    \`!bingo bingo\`                      Declares that you have a bingo (validation is performed...)
+    \`!bingo leave\`                      Leaves a game
     \`!bingo format {format}\` Switches how your card is sent to you between an inline table (table), a comma-separated values list (csv), and a tab-separated values list (tsv)
-    \`!bingo card\`            Displays your card and which words have been called already
-    \`!bingo help\`            Shows this help screen`;
+    \`!bingo card\`                       Displays your card and which words have been called already
+    \`!bingo help\`                       Shows this help screen`;
                 if (adminUsers.indexOf(userId) >= 0) error = `You have the following additional commands available to you:
-    \`!bingo list\`            Lists all ongoing games
+    \`!bingo list\`                       Lists all ongoing games
     \`!bingo get {channel}\`   Displays details about a given channel's game
     \`!bingo kill {channel}\`  Kills the game in a given channel`;
                 break;
